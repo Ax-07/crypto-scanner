@@ -11,6 +11,7 @@ Ce projet est exclusivement un outil d'analyse de marché. Il ne contient aucune
 ## 📋 Fonctionnalités
 
 ### V1 - Base RSI
+
 * Scan automatique de toutes les paires Binance (scope configurable)
 * Calcul du RSI (Relative Strength Index)
 * Détection des paires survendues (RSI < seuil)
@@ -20,6 +21,7 @@ Ce projet est exclusivement un outil d'analyse de marché. Il ne contient aucune
 * Logs détaillés
 
 ### V1.5 - Moyennes Mobiles Multi-Timeframe ✨ NEW
+
 * **Calcul des moyennes mobiles** (SMA et EMA) sur périodes 20 et 50
 * **Analyse multi-timeframe** (Hebdo, Daily, H4)
 * **Détection de tendance** haussière/baissière par timeframe
@@ -103,18 +105,21 @@ Tous les paramètres sont dans [config.py](config.py):
 ### Recommandations
 
 **Configuration équilibrée (défaut)** :
+
 ```python
 RSI_THRESHOLD = 35
 MIN_TREND_SCORE = 2  # Au moins 2 timeframes haussiers
 ```
 
 **Configuration stricte** :
+
 ```python
 RSI_THRESHOLD = 30   # Survente forte
 MIN_TREND_SCORE = 3  # Les 3 timeframes doivent être haussiers
 ```
 
 **Configuration large** :
+
 ```python
 RSI_THRESHOLD = 40-45
 MIN_TREND_SCORE = 1
@@ -150,12 +155,14 @@ Total: 2 paire(s)
 ```
 
 **Interprétation** :
-- **Trend** : Score de tendance (nombre de timeframes haussiers sur 3)
-- **✓** : Tendance haussière sur ce timeframe
-- **✗** : Tendance baissière sur ce timeframe
-- Plus le trend_score est élevé, plus l'opportunité est forte
+
+* **Trend** : Score de tendance (nombre de timeframes haussiers sur 3)
+* **✓** : Tendance haussière sur ce timeframe
+* **✗** : Tendance baissière sur ce timeframe
+* Plus le trend_score est élevé, plus l'opportunité est forte
 
 **CSV (24 colonnes):**
+
 ```csv
 symbol,rsi,last_close_price,last_close_time,timeframe,trend_score,
 sma20_1w,ema20_1w,sma50_1w,ema50_1w,trend_1w,
@@ -163,9 +170,11 @@ sma20_1d,ema20_1d,sma50_1d,ema50_1d,trend_1d,
 sma20_4h,ema20_4h,sma50_4h,ema50_4h,trend_4h,
 rsi_period,rsi_threshold,scan_date
 ```
+
 Le fichier contient les colonnes suivantes:
 
 **Colonnes de base (V1)** :
+
 * `symbol`: Nom de la paire
 * `rsi`: Valeur du RSI
 * `last_close_price`: Prix de clôture
@@ -173,6 +182,7 @@ Le fichier contient les colonnes suivantes:
 * `timeframe`: Timeframe utilisé
 
 **Colonnes moyennes mobiles (V1.5)** :
+
 * `trend_score`: Score global (0-3)
 * `sma20_1w`, `sma50_1w`: SMA hebdomadaire
 * `ema20_1w`, `ema50_1w`: EMA hebdomadaire
@@ -185,6 +195,7 @@ Le fichier contient les colonnes suivantes:
 * `trend_4h`: Tendance 4h (True/False)
 
 **Métadonnées** :
+
 * `rsi_period`: Période RSI
 * `rsi_threshold`: Seuil RSI
 * `scan_date`: Date du scan

@@ -1,0 +1,9 @@
+# Crypto Scanner RSI - Dependencies
+# Python 3.10+
+
+ccxt>=4.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+# Code quality tools
+flake8>=6.0.0

@@ -170,53 +170,94 @@ def calculate_ema(prices, period=20):
         return None
 
 
-def detect_trend(prices, sma20, sma50, ema20, ema50):
+def detect_trend(prices, sma20=None, sma50=None, ema20=None, ema50=None):
     """
     Détecte si la tendance est haussière ou baissière
+    Fonctionne avec SMA uniquement, EMA uniquement, ou les deux
 
     Logique :
-    - Haussier si : Prix > SMA20 ET Prix > SMA50 OU EMA20 > EMA50
-    - Baissier sinon
+    - Si SMA disponibles : Prix > SMA20 ET Prix > SMA50
+    - Si EMA disponibles : EMA20 > EMA50 (croisement haussier)
+    - Si les deux : Prix > SMA20 ET Prix > SMA50 OU EMA20 > EMA50
+    - Haussier si au moins une condition est vraie
 
     Args:
         prices (pd.Series): Série des prix de clôture
-        sma20 (pd.Series): SMA période 20
-        sma50 (pd.Series): SMA période 50
-        ema20 (pd.Series): EMA période 20
-        ema50 (pd.Series): EMA période 50
+        sma20 (pd.Series ou float): SMA période 20 (optionnel)
+        sma50 (pd.Series ou float): SMA période 50 (optionnel)
+        ema20 (pd.Series ou float): EMA période 20 (optionnel)
+        ema50 (pd.Series ou float): EMA période 50 (optionnel)
 
     Returns:
         bool: True si tendance haussière, False si baissière
         None: En cas d'erreur ou données insuffisantes
     """
     try:
-        # Vérifier que toutes les séries ont des données
-        if any(x is None for x in [prices, sma20, sma50, ema20, ema50]):
-            logger.warning("Données manquantes pour la détection de tendance")
+        # Vérifier qu'on a au moins un type de MA
+        has_sma = sma20 is not None and sma50 is not None
+        has_ema = ema20 is not None and ema50 is not None
+
+        if not has_sma and not has_ema:
+            logger.warning("Aucune moyenne mobile fournie pour la détection de tendance")
             return None
 
-        # Récupérer les dernières valeurs valides
-        last_price = prices.dropna().iloc[-1] if len(prices.dropna()) > 0 else None
-        last_sma20 = sma20.dropna().iloc[-1] if len(sma20.dropna()) > 0 else None
-        last_sma50 = sma50.dropna().iloc[-1] if len(sma50.dropna()) > 0 else None
-        last_ema20 = ema20.dropna().iloc[-1] if len(ema20.dropna()) > 0 else None
-        last_ema50 = ema50.dropna().iloc[-1] if len(ema50.dropna()) > 0 else None
+        # Récupérer le dernier prix (peut être Series ou float)
+        if isinstance(prices, pd.Series):
+            last_price = prices.dropna().iloc[-1] if len(prices.dropna()) > 0 else None
+        else:
+            last_price = float(prices) if prices is not None else None
 
-        # Vérifier qu'on a toutes les valeurs
-        if None in [last_price, last_sma20, last_sma50, last_ema20, last_ema50]:
-            logger.warning("Valeurs manquantes pour la détection de tendance")
+        if last_price is None:
+            logger.warning("Prix manquant pour la détection de tendance")
             return None
 
-        # Condition 1 : Prix > SMA20 ET Prix > SMA50
-        price_above_sma = last_price > last_sma20 and last_price > last_sma50
+        conditions = []
 
-        # Condition 2 : EMA20 > EMA50 (croisement haussier)
-        ema_crossover = last_ema20 > last_ema50
+        # Condition SMA : Prix > SMA20 ET Prix > SMA50
+        if has_sma:
+            # Convertir en float si c'est une Series
+            if isinstance(sma20, pd.Series):
+                last_sma20 = sma20.dropna().iloc[-1] if len(sma20.dropna()) > 0 else None
+            else:
+                last_sma20 = float(sma20) if sma20 is not None else None
 
-        # Tendance haussière si l'une des deux conditions est vraie
-        is_bullish = price_above_sma or ema_crossover
+            if isinstance(sma50, pd.Series):
+                last_sma50 = sma50.dropna().iloc[-1] if len(sma50.dropna()) > 0 else None
+            else:
+                last_sma50 = float(sma50) if sma50 is not None else None
 
-        logger.debug(f"Tendance: {'Haussière' if is_bullish else 'Baissière'} | Prix>{last_price:.2f} SMA20>{last_sma20:.2f} SMA50>{last_sma50:.2f} | EMA20>{last_ema20:.2f} EMA50>{last_ema50:.2f}")
+            if last_sma20 is not None and last_sma50 is not None:
+                price_above_sma = last_price > last_sma20 and last_price > last_sma50
+                conditions.append(price_above_sma)
+                logger.debug(f"SMA: Prix={last_price:.2f} > SMA20={last_sma20:.2f} & SMA50={last_sma50:.2f} => {price_above_sma}")
+
+        # Condition EMA : EMA20 > EMA50 (croisement haussier)
+        if has_ema:
+            # Convertir en float si c'est une Series
+            if isinstance(ema20, pd.Series):
+                last_ema20 = ema20.dropna().iloc[-1] if len(ema20.dropna()) > 0 else None
+            else:
+                last_ema20 = float(ema20) if ema20 is not None else None
+
+            if isinstance(ema50, pd.Series):
+                last_ema50 = ema50.dropna().iloc[-1] if len(ema50.dropna()) > 0 else None
+            else:
+                last_ema50 = float(ema50) if ema50 is not None else None
+
+            if last_ema20 is not None and last_ema50 is not None:
+                ema_crossover = last_ema20 > last_ema50
+                conditions.append(ema_crossover)
+                logger.debug(f"EMA: EMA20={last_ema20:.2f} > EMA50={last_ema50:.2f} => {ema_crossover}")
+
+        # Vérifier qu'on a au moins une condition valide
+        if not conditions:
+            logger.warning("Aucune condition valide pour la détection de tendance")
+            return None
+
+        # Tendance haussière si l'une des conditions est vraie
+        is_bullish = any(conditions)
+
+        logger.debug(f"Tendance: {'Haussière' if is_bullish else 'Baissière'} ({len([c for c in conditions if c])}/{len(conditions)} conditions)")
 
         return is_bullish
 

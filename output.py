@@ -1,6 +1,7 @@
 """
 Formatage et export des résultats du scan
 Console et CSV
+V2.5 : Support multi-indicateurs (MACD, Bollinger, Stochastic)
 """
 
 import os
@@ -86,6 +87,32 @@ def display_results_console(results):
                 df[col_name] = df[col_name].apply(lambda x: '✓' if x is True else ('✗' if x is False else '-'))
                 columns_to_display.append(col_name)
 
+    # V2.5 : Ajouter les colonnes multi-indicateurs
+    if config.USE_MACD and 'macd_signal_type' in df.columns:
+        columns_to_display.append('macd_signal_type')
+
+    if config.USE_BOLLINGER and 'bb_position' in df.columns:
+        columns_to_display.append('bb_position')
+
+    if config.USE_STOCHASTIC and 'stoch_signal' in df.columns:
+        columns_to_display.append('stoch_signal')
+
+    # V3 : Ajouter le score de confluence
+    if config.USE_CONFLUENCE_SCORE and 'confluence_score' in df.columns:
+        # Formater le score avec le grade
+        if 'confluence_grade' in df.columns:
+            df['confluence_display'] = df.apply(
+                lambda row: f"{row['confluence_score']:.1f} ({row['confluence_grade']})"
+                if pd.notna(row['confluence_score']) else '-',
+                axis=1
+            )
+            columns_to_display.append('confluence_display')
+        else:
+            df['confluence_score'] = df['confluence_score'].apply(
+                lambda x: f"{x:.1f}" if pd.notna(x) else '-'
+            )
+            columns_to_display.append('confluence_score')
+
     # Créer le DataFrame d'affichage
     display_df = df[columns_to_display].copy()
 
@@ -96,7 +123,12 @@ def display_results_console(results):
         'last_close_price': 'Prix',
         'last_close_time': 'Date',
         'timeframe': 'TF',
-        'trend_score': 'Trend'
+        'trend_score': 'Trend',
+        'confluence_display': 'Score',
+        'confluence_score': 'Score',
+        'macd_signal_type': 'MACD',
+        'bb_position': 'Bollinger',
+        'stoch_signal': 'Stochastic'
     }
 
     # Ajouter les renommages pour les tendances
@@ -190,6 +222,38 @@ def export_to_csv(results):
                 col_trend = f'trend_{tf}'
                 if col_trend in df.columns:
                     columns_order.append(col_trend)
+
+        # V2.5 : Ajouter les colonnes multi-indicateurs
+        if config.USE_MACD:
+            for col in ['macd', 'macd_signal', 'macd_histogram', 'macd_signal_type']:
+                if col in df.columns:
+                    columns_order.append(col)
+
+        if config.USE_BOLLINGER:
+            for col in ['bb_upper', 'bb_middle', 'bb_lower', 'bb_position']:
+                if col in df.columns:
+                    columns_order.append(col)
+
+        if config.USE_STOCHASTIC:
+            for col in ['stoch_k', 'stoch_d', 'stoch_signal']:
+                if col in df.columns:
+                    columns_order.append(col)
+
+        # V3 : Ajouter les colonnes de confluence
+        if config.USE_CONFLUENCE_SCORE:
+            for col in ['confluence_score', 'confluence_grade']:
+                if col in df.columns:
+                    columns_order.append(col)
+            # Ajouter le breakdown si disponible (décomposé en colonnes séparées)
+            if 'confluence_breakdown' in df.columns:
+                # Extraire les sous-scores du breakdown
+                try:
+                    breakdown_df = pd.json_normalize(df['confluence_breakdown'])
+                    for col in breakdown_df.columns:
+                        df[f'score_{col}'] = breakdown_df[col]
+                        columns_order.append(f'score_{col}')
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    pass  # Ignorer si le breakdown n'est pas au bon format
 
         # Ajouter les métadonnées à la fin
         metadata_cols = []

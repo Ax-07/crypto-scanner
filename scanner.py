@@ -2,13 +2,27 @@
 Logique principale du scanner RSI + Moyennes Mobiles
 Orchestration du scan et filtrage des paires
 V2 : Concurrency avec ThreadPoolExecutor
+V2.5 : Multi-indicateurs (MACD, Bollinger Bands, Stochastic)
 """
 
 import config
 from logger import get_logger
 from exchange import get_filtered_pairs
 from data import fetch_ohlcv, get_last_closed_candle
-from indicators import get_latest_rsi, calculate_sma, calculate_ema, detect_trend
+from indicators import (
+    get_latest_rsi,
+    calculate_sma,
+    calculate_ema,
+    detect_trend,
+    calculate_macd,
+    detect_macd_signal,
+    calculate_bollinger_bands,
+    detect_bollinger_signal,
+    calculate_stochastic,
+    detect_stochastic_signal,
+    calculate_confluence_score,
+    check_signal_filters,
+)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
@@ -72,18 +86,18 @@ def analyze_pair_ma(exchange, symbol):
 
             if config.USE_SMA:
                 for period in config.SMA_PERIODS:
-                    sma = calculate_sma(df['close'], period)
+                    sma = calculate_sma(df["close"], period)
                     if sma is not None:
                         sma_value = float(sma.iloc[-1])
-                        results[f'sma{period}_{tf}'] = round(sma_value, 8)
+                        results[f"sma{period}_{tf}"] = round(sma_value, 8)
                         sma_results[period] = sma_value
 
             if config.USE_EMA:
                 for period in config.EMA_PERIODS:
-                    ema = calculate_ema(df['close'], period)
+                    ema = calculate_ema(df["close"], period)
                     if ema is not None:
                         ema_value = float(ema.iloc[-1])
-                        results[f'ema{period}_{tf}'] = round(ema_value, 8)
+                        results[f"ema{period}_{tf}"] = round(ema_value, 8)
                         ema_results[period] = ema_value
 
             # Détecter la tendance si on a les MA nécessaires (20 et 50)
@@ -96,29 +110,144 @@ def analyze_pair_ma(exchange, symbol):
                 ema20 = ema_results.get(20) if has_ema_20_50 else None
                 ema50 = ema_results.get(50) if has_ema_20_50 else None
 
-                is_bullish = detect_trend(
-                    df['close'],
-                    sma20,
-                    sma50,
-                    ema20,
-                    ema50
-                )
+                is_bullish = detect_trend(df["close"], sma20, sma50, ema20, ema50)
 
-                results[f'trend_{tf}'] = is_bullish
+                results[f"trend_{tf}"] = is_bullish
 
                 # Incrémenter le trend_score si haussier
                 if is_bullish:
                     trend_score += 1
             else:
-                results[f'trend_{tf}'] = None
+                results[f"trend_{tf}"] = None
 
         # Ajouter le trend_score global
-        results['trend_score'] = trend_score
+        results["trend_score"] = trend_score
 
         return results
 
     except Exception as e:
         logger.error(f"    ✗ Erreur analyse MA pour {symbol}: {str(e)}")
+        return None
+
+
+def analyze_pair_multi_indicators(exchange, symbol):
+    """
+    Analyse les multi-indicateurs d'une paire (MACD, Bollinger, Stochastic)
+
+    Args:
+        exchange: Instance CCXT de l'exchange
+        symbol (str): Symbole de la paire (ex: "BTC/USDC")
+
+    Returns:
+        dict: Résultats des indicateurs
+        {
+            'macd': float,
+            'macd_signal': float,
+            'macd_histogram': float,
+            'macd_signal_type': str ('bullish', 'bearish', 'neutral'),
+            'bb_upper': float,
+            'bb_middle': float,
+            'bb_lower': float,
+            'bb_position': str ('oversold', 'overbought', 'neutral'),
+            'stoch_k': float,
+            'stoch_d': float,
+            'stoch_signal': str ('oversold', 'overbought', 'bullish_cross', 'bearish_cross', 'neutral')
+        }
+        None si aucun indicateur activé ou erreur
+    """
+    results = {}
+
+    try:
+        # Vérifier si au moins un indicateur est activé
+        if not (config.USE_MACD or config.USE_BOLLINGER or config.USE_STOCHASTIC):
+            return None
+
+        # Déterminer la période maximale nécessaire
+        max_period = max(
+            (
+                config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD
+                if config.USE_MACD
+                else 0
+            ),
+            config.BOLLINGER_PERIOD if config.USE_BOLLINGER else 0,
+            config.STOCHASTIC_K_PERIOD if config.USE_STOCHASTIC else 0,
+        )
+
+        limit = max(200, max_period + 50)  # Marge suffisante
+
+        # Récupérer les données OHLCV
+        df = fetch_ohlcv(exchange, symbol, timeframe=config.TIMEFRAME, limit=limit)
+
+        if df is None or len(df) < max_period:
+            logger.debug("    ⚠ Données insuffisantes pour multi-indicateurs")
+            return None
+
+        # === MACD ===
+        if config.USE_MACD:
+            macd_data = calculate_macd(
+                df["close"],
+                fast_period=config.MACD_FAST_PERIOD,
+                slow_period=config.MACD_SLOW_PERIOD,
+                signal_period=config.MACD_SIGNAL_PERIOD,
+            )
+
+            if macd_data:
+                results["macd"] = round(float(macd_data["macd"].iloc[-1]), 8)
+                results["macd_signal"] = round(float(macd_data["signal"].iloc[-1]), 8)
+                results["macd_histogram"] = round(
+                    float(macd_data["histogram"].iloc[-1]), 8
+                )
+                results["macd_signal_type"] = detect_macd_signal(macd_data)
+
+                logger.debug(
+                    f"    MACD: {results['macd']:.4f} | Signal: {results['macd_signal_type']}"
+                )
+
+        # === BOLLINGER BANDS ===
+        if config.USE_BOLLINGER:
+            bb_data = calculate_bollinger_bands(
+                df["close"],
+                period=config.BOLLINGER_PERIOD,
+                std_dev=config.BOLLINGER_STD_DEV,
+            )
+
+            if bb_data:
+                results["bb_upper"] = round(float(bb_data["upper"].iloc[-1]), 8)
+                results["bb_middle"] = round(float(bb_data["middle"].iloc[-1]), 8)
+                results["bb_lower"] = round(float(bb_data["lower"].iloc[-1]), 8)
+                results["bb_position"] = detect_bollinger_signal(df["close"], bb_data)
+
+                logger.debug(
+                    f"    BB: {results['bb_middle']:.2f} | Position: {results['bb_position']}"
+                )
+
+        # === STOCHASTIC ===
+        if config.USE_STOCHASTIC:
+            stoch_data = calculate_stochastic(
+                df["high"],
+                df["low"],
+                df["close"],
+                k_period=config.STOCHASTIC_K_PERIOD,
+                d_period=config.STOCHASTIC_D_PERIOD,
+            )
+
+            if stoch_data:
+                results["stoch_k"] = round(float(stoch_data["k"].iloc[-1]), 2)
+                results["stoch_d"] = round(float(stoch_data["d"].iloc[-1]), 2)
+                results["stoch_signal"] = detect_stochastic_signal(
+                    stoch_data,
+                    oversold_level=config.STOCHASTIC_OVERSOLD,
+                    overbought_level=config.STOCHASTIC_OVERBOUGHT,
+                )
+
+                logger.debug(
+                    f"    Stoch: K={results['stoch_k']:.1f} D={results['stoch_d']:.1f} | Signal: {results['stoch_signal']}"
+                )
+
+        return results if results else None
+
+    except Exception as e:
+        logger.error(f"    ✗ Erreur analyse multi-indicateurs pour {symbol}: {str(e)}")
         return None
 
 
@@ -152,20 +281,20 @@ def analyze_single_pair(exchange, symbol, idx, total):
 
             if df_rsi is None or len(df_rsi) == 0:
                 logger.debug(f"  ⚠ Données insuffisantes pour {symbol}")
-                return ('error', None)
+                return ("error", None)
 
             # Calculer le RSI
-            rsi = get_latest_rsi(df_rsi['close'], period=config.RSI_PERIOD)
+            rsi = get_latest_rsi(df_rsi["close"], period=config.RSI_PERIOD)
 
             if rsi is None:
                 logger.debug(f"  ⚠ Impossible de calculer RSI pour {symbol}")
-                return ('error', None)
+                return ("error", None)
 
             logger.debug(f"  ✓ {symbol}: RSI = {rsi:.2f}")
 
             # Filtrer si RSI < seuil
             if rsi >= config.RSI_THRESHOLD:
-                return ('filtered', None)
+                return ("filtered", None)
 
             last_candle = get_last_closed_candle(df_rsi)
         else:
@@ -183,46 +312,116 @@ def analyze_single_pair(exchange, symbol, idx, total):
         # ===== C. FILTRE COMBINÉ =====
         # Si MA activée, vérifier le trend_score
         if config.USE_MA and ma_data:
-            trend_score = ma_data.get('trend_score', 0)
+            trend_score = ma_data.get("trend_score", 0)
 
             if trend_score < config.MIN_TREND_SCORE:
-                logger.debug(f"    ⚠ Trend score insuffisant: {trend_score}/{len(config.MA_TIMEFRAMES)}")
-                return ('filtered', None)
+                logger.debug(
+                    f"    ⚠ Trend score insuffisant: {trend_score}/{len(config.MA_TIMEFRAMES)}"
+                )
+                return ("filtered", None)
 
         # ===== D. CONSTRUIRE LE RÉSULTAT =====
-        result = {
-            'symbol': symbol,
-            'timeframe': config.TIMEFRAME
-        }
+        result = {"symbol": symbol, "timeframe": config.TIMEFRAME}
 
         # Ajouter RSI si calculé
         if rsi is not None:
-            result['rsi'] = round(rsi, 2)
+            result["rsi"] = round(rsi, 2)
 
         # Ajouter prix et date si disponibles
         if last_candle:
-            result['last_close_price'] = last_candle['close']
-            result['last_close_time'] = last_candle['time']
+            result["last_close_price"] = last_candle["close"]
+            result["last_close_time"] = last_candle["time"]
 
         # Ajouter les données MA si disponibles
         if ma_data:
             result.update(ma_data)
+
+        # ===== D. CALCUL MULTI-INDICATEURS (V2.5) =====
+        multi_ind_data = None
+        if config.USE_MACD or config.USE_BOLLINGER or config.USE_STOCHASTIC:
+            logger.debug("    Analyse multi-indicateurs...")
+            multi_ind_data = analyze_pair_multi_indicators(exchange, symbol)
+
+            if multi_ind_data:
+                result.update(multi_ind_data)
+
+        # ===== E. FILTRES AVANCÉS SUR SIGNAUX (V3) =====
+        if multi_ind_data:
+            # Vérifier les filtres de signaux
+            filters_passed = check_signal_filters(
+                macd_signal=multi_ind_data.get("macd_signal_type"),
+                bb_position=multi_ind_data.get("bb_position"),
+                stoch_signal=multi_ind_data.get("stoch_signal"),
+                filter_macd=config.FILTER_MACD_SIGNAL,
+                filter_bb=config.FILTER_BB_POSITION,
+                filter_stoch=config.FILTER_STOCH_SIGNAL,
+            )
+
+            if not filters_passed:
+                logger.debug(
+                    "    ⚠ Signaux ne correspondent pas aux filtres configurés"
+                )
+                return ("filtered", None)
+
+        # ===== F. SCORE DE CONFLUENCE (V3) =====
+        confluence_data = None
+        if config.USE_CONFLUENCE_SCORE:
+            logger.debug("    Calcul du score de confluence...")
+
+            confluence_data = calculate_confluence_score(
+                rsi_value=rsi,
+                trend_score=ma_data.get("trend_score") if ma_data else None,
+                max_trend_score=len(config.MA_TIMEFRAMES) if config.USE_MA else 0,
+                macd_signal=(
+                    multi_ind_data.get("macd_signal_type") if multi_ind_data else None
+                ),
+                bb_position=(
+                    multi_ind_data.get("bb_position") if multi_ind_data else None
+                ),
+                stoch_signal=(
+                    multi_ind_data.get("stoch_signal") if multi_ind_data else None
+                ),
+                weights=config.CONFLUENCE_WEIGHTS,
+            )
+
+            if confluence_data:
+                result["confluence_score"] = confluence_data["score"]
+                result["confluence_grade"] = confluence_data["grade"]
+                result["confluence_breakdown"] = confluence_data["breakdown"]
+
+                # Filtre par score minimum
+                if confluence_data["score"] < config.MIN_CONFLUENCE_SCORE:
+                    logger.debug(
+                        f"    ⚠ Score de confluence insuffisant: {confluence_data['score']:.1f}/{config.MIN_CONFLUENCE_SCORE}"
+                    )
+                    return ("filtered", None)
 
         # Log détaillé
         log_parts = [symbol]
         if rsi is not None:
             log_parts.append(f"RSI={rsi:.2f}")
         if config.USE_MA and ma_data:
-            trend_score = ma_data.get('trend_score', 0)
+            trend_score = ma_data.get("trend_score", 0)
             log_parts.append(f"Trend={trend_score}/{len(config.MA_TIMEFRAMES)}")
+        if multi_ind_data:
+            if "macd_signal_type" in multi_ind_data:
+                log_parts.append(f"MACD={multi_ind_data['macd_signal_type']}")
+            if "bb_position" in multi_ind_data:
+                log_parts.append(f"BB={multi_ind_data['bb_position']}")
+            if "stoch_signal" in multi_ind_data:
+                log_parts.append(f"Stoch={multi_ind_data['stoch_signal']}")
+        if confluence_data:
+            log_parts.append(
+                f"Score={confluence_data['score']:.1f} ({confluence_data['grade']})"
+            )
 
         logger.info(f"  🎯 {' | '.join(log_parts)}")
 
-        return ('success', result)
+        return ("success", result)
 
     except Exception as e:
         logger.error(f"  ✗ Erreur inattendue pour {symbol}: {str(e)}")
-        return ('error', None)
+        return ("error", None)
 
 
 def scan_market():
@@ -257,13 +456,17 @@ def scan_market():
     logger.info(f"  - Exchange: {config.EXCHANGE_ID}")
     logger.info(f"  - Quote: {config.QUOTE_FILTER}")
     logger.info(f"  - Max paires: {config.MAX_PAIRS if config.MAX_PAIRS else 'Toutes'}")
-    logger.info(f"  - Concurrency: {'✓ Activée' if config.ENABLE_CONCURRENCY else '✗ Désactivée'}")
+    logger.info(
+        f"  - Concurrency: {'✓ Activée' if config.ENABLE_CONCURRENCY else '✗ Désactivée'}"
+    )
     if config.ENABLE_CONCURRENCY:
         logger.info(f"    Workers: {config.MAX_WORKERS}")
     logger.info("  - Indicateurs activés:")
 
     if config.USE_RSI:
-        logger.info(f"    • RSI: seuil < {config.RSI_THRESHOLD} (période {config.RSI_PERIOD}, TF {config.TIMEFRAME})")
+        logger.info(
+            f"    • RSI: seuil < {config.RSI_THRESHOLD} (période {config.RSI_PERIOD}, TF {config.TIMEFRAME})"
+        )
 
     if config.USE_MA:
         ma_types = []
@@ -277,7 +480,9 @@ def scan_market():
         logger.info(f"      - Min trend score: {config.MIN_TREND_SCORE}")
 
     if not config.USE_RSI and not config.USE_MA:
-        logger.warning("  ⚠ AUCUN INDICATEUR ACTIVÉ - Le scan listera toutes les paires")
+        logger.warning(
+            "  ⚠ AUCUN INDICATEUR ACTIVÉ - Le scan listera toutes les paires"
+        )
 
     logger.info("=" * 60)
 
@@ -309,7 +514,9 @@ def scan_market():
             with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
                 # Soumettre toutes les tâches
                 future_to_symbol = {
-                    executor.submit(analyze_single_pair, exchange, symbol, idx, len(symbols)): symbol
+                    executor.submit(
+                        analyze_single_pair, exchange, symbol, idx, len(symbols)
+                    ): symbol
                     for idx, symbol in enumerate(symbols, 1)
                 }
 
@@ -319,10 +526,10 @@ def scan_market():
                     try:
                         status, result = future.result()
 
-                        if status == 'success':
+                        if status == "success":
                             results.append(result)
                             success_count += 1
-                        elif status == 'filtered':
+                        elif status == "filtered":
                             filtered_count += 1
                         else:  # error
                             error_count += 1
@@ -336,12 +543,14 @@ def scan_market():
 
             for idx, symbol in enumerate(symbols, 1):
                 try:
-                    status, result = analyze_single_pair(exchange, symbol, idx, len(symbols))
+                    status, result = analyze_single_pair(
+                        exchange, symbol, idx, len(symbols)
+                    )
 
-                    if status == 'success':
+                    if status == "success":
                         results.append(result)
                         success_count += 1
-                    elif status == 'filtered':
+                    elif status == "filtered":
                         filtered_count += 1
                     else:  # error
                         error_count += 1
@@ -358,12 +567,12 @@ def scan_market():
     # Si RSI activé, trier par RSI ascendant
     # Sinon si MA activée, trier par trend_score descendant
     # Sinon par symbole
-    if config.USE_RSI and results and 'rsi' in results[0]:
-        results.sort(key=lambda x: x.get('rsi', 999))
-    elif config.USE_MA and results and 'trend_score' in results[0]:
-        results.sort(key=lambda x: x.get('trend_score', 0), reverse=True)
+    if config.USE_RSI and results and "rsi" in results[0]:
+        results.sort(key=lambda x: x.get("rsi", 999))
+    elif config.USE_MA and results and "trend_score" in results[0]:
+        results.sort(key=lambda x: x.get("trend_score", 0), reverse=True)
     else:
-        results.sort(key=lambda x: x.get('symbol', ''))
+        results.sort(key=lambda x: x.get("symbol", ""))
 
     # 4. Logs de fin
     elapsed_time = time.time() - start_time
@@ -371,7 +580,9 @@ def scan_market():
     logger.info("-" * 60)
     logger.info("FIN DU SCAN")
     logger.info(f"Durée totale: {elapsed_time:.2f}s")
-    logger.info(f"Paires traitées: {success_count + filtered_count + error_count}/{len(symbols)}")
+    logger.info(
+        f"Paires traitées: {success_count + filtered_count + error_count}/{len(symbols)}"
+    )
     logger.info(f"  - Succès: {success_count}")
     logger.info(f"  - Filtrées: {filtered_count}")
     logger.info(f"  - Erreurs: {error_count}")

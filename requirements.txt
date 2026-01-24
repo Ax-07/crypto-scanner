@@ -5,5 +5,11 @@ ccxt>=4.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 python-dotenv>=1.0.0
+
+# GUI Desktop Application
+PyQt6>=6.6.0
+matplotlib>=3.8.0
+openpyxl>=3.1.0  # Pour export Excel
+
 # Code quality tools
 flake8>=6.0.0

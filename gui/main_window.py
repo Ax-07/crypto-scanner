@@ -29,6 +29,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Crypto Scanner - Binance RSI & Multi-Indicateurs")
         self.setGeometry(100, 100, 1400, 900)
+        
+        # Stocker l'exchange pour le passer aux détails
+        self.exchange_instance = None
 
         # Appliquer le thème sombre
         self.setStyleSheet(get_dark_theme())
@@ -153,8 +156,11 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(1)  # Aller sur onglet Scanner
         self.scanner_tab.start_scan()
 
-    def on_scan_finished(self, results):
+    def on_scan_finished(self, results, exchange_instance):
         """Callback quand un scan est terminé"""
+        # Stocker l'exchange pour utilisation future
+        self.exchange_instance = exchange_instance
+        
         self.results_tab.load_results(results)
 
         # Passer à l'onglet résultats
@@ -167,7 +173,8 @@ class MainWindow(QMainWindow):
 
     def on_pair_selected(self, pair_data):
         """Callback quand une paire est sélectionnée"""
-        self.details_tab.load_pair_data(pair_data)
+        # Utiliser la nouvelle méthode update_details avec exchange
+        self.details_tab.update_details(pair_data, self.exchange_instance)
 
         # Passer à l'onglet détails
         self.tabs.setCurrentIndex(3)

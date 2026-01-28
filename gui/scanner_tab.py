@@ -26,7 +26,7 @@ class ScanWorker(QThread):
     # Signaux
     progress = pyqtSignal(int, int)  # current, total
     log_message = pyqtSignal(str)
-    scan_completed = pyqtSignal(list)  # results
+    scan_completed = pyqtSignal(list, object)  # results, exchange
     scan_error = pyqtSignal(str)
 
     def __init__(self):
@@ -47,7 +47,7 @@ class ScanWorker(QThread):
             self.log_message.emit("🔍 Début du scan...")
             start_time = time.time()
 
-            results = run_scan(
+            results, exchange_instance = run_scan(
                 exchange_instance=None,  # L'adaptateur créera l'instance
                 progress_callback=self._on_progress,
                 log_callback=self._on_log,
@@ -58,7 +58,7 @@ class ScanWorker(QThread):
             self.log_message.emit(f"\n✅ Scan terminé en {elapsed:.1f}s")
             self.log_message.emit(f"📊 {len(results)} opportunités trouvées")
 
-            self.scan_completed.emit(results)
+            self.scan_completed.emit(results, exchange_instance)
 
         except Exception as e:
             self.log_message.emit(f"\n❌ Erreur: {str(e)}")
@@ -85,8 +85,8 @@ class ScannerTab(QWidget):
     Permet de lancer un scan et suivre sa progression
     """
 
-    # Signal émis quand scan terminé
-    scan_finished = pyqtSignal(list)
+    # Signal émis quand scan terminé (results, exchange_instance)
+    scan_finished = pyqtSignal(list, object)
 
     def __init__(self):
         super().__init__()
@@ -234,7 +234,7 @@ class ScannerTab(QWidget):
         """Efface tous les logs"""
         self.logs_text.clear()
 
-    def on_scan_completed(self, results):
+    def on_scan_completed(self, results, exchange_instance):
         """Callback quand le scan est terminé avec succès"""
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -242,8 +242,8 @@ class ScannerTab(QWidget):
         self.progress_label.setText(f"✅ Scan terminé - {len(results)} opportunités")
         self.opportunities_label.setText(f"Opportunités: {len(results)}")
 
-        # Émettre signal pour onglet résultats
-        self.scan_finished.emit(results)
+        # Émettre signal pour onglet résultats (avec exchange)
+        self.scan_finished.emit(results, exchange_instance)
 
     def on_scan_error(self, error_msg):
         """Callback quand le scan échoue"""

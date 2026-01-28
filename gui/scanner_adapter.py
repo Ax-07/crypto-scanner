@@ -20,7 +20,9 @@ def run_scan(exchange_instance=None, progress_callback=None, log_callback=None):
         log_callback: Fonction callback(message) pour logs
 
     Returns:
-        list: Résultats du scan
+        tuple: (results, exchange_instance)
+            - results (list): Résultats du scan
+            - exchange_instance: Instance exchange utilisée
     """
     # Si pas d'exchange fourni, en créer un
     if exchange_instance is None:
@@ -56,7 +58,7 @@ def run_scan(exchange_instance=None, progress_callback=None, log_callback=None):
     try:
         # Lancer le scan
         results = scanner.scan_market()
-        return results
+        return results, exchange_instance
 
     finally:
         # Restaurer le logger
